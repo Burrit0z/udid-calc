@@ -9,8 +9,8 @@
 // ever. Just copy the imports and code inside the getUDID function into your
 // project.
 
-#include <dlfcn.h>
 #import <Foundation/Foundation.h>
+#include <dlfcn.h>
 #if !(__arm64e__)
 #import <CommonCrypto/CommonDigest.h>
 #endif
@@ -19,7 +19,6 @@
 // minimum. Otherwise, one can dlopen your executable and use MobileSubstrate to
 // very easily hook it, and all our work is for nothing.
 NSString *getUDID() {
-
     // All of this below is equivalent to the one line:
     // NSString *UDID = (NSString *)CFBridgingRelease((CFStringRef)MGCopyAnswer(CFSTR("UniqueDeviceID")));
     // However, it does require linking agaist libMobileGestalt
@@ -30,10 +29,11 @@ NSString *getUDID() {
     // we don't get a hooked version
     void *gestalt_handle = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
     if(gestalt_handle == NULL) return;
-    CFPropertyListRef (*MGCopyAnswer)(CFStringRef property) = (CFPropertyListRef(*)(CFStringRef property))dlsym(gestalt_handle, "MGCopyAnswer");
+    typedef CFPropertyListRef (*mgcopyanswer_ptr_t)(CFStringRef property);
+    mgcopyanswer_ptr_t MGCopyAnswer = (mgcopyanswer_ptr_t)dlsym(gestalt_handle, "MGCopyAnswer");
     if(MGCopyAnswer == NULL) return;
 
-    #if __arm64e__
+#if __arm64e__
 
     // All we need for A12 is Chip ID and ECID
     NSNumber *chipIDNumber = (NSNumber *)CFBridgingRelease((CFStringRef)MGCopyAnswer(CFSTR("ChipID")));
@@ -46,14 +46,15 @@ NSString *getUDID() {
 
     NSString *secret = [NSString stringWithFormat:@"%@-%@", chipid, ecid];
 
-    #else
+#else
 
     // On A11 and below, we have to use Security framework for CC_SHA1 (SHA1)
     // Same idea here, just dlopen it in order to get the function pointer
     // Enjoy the lovely one liner with the cast.
     void *security_handle = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_NOW);
     if(security_handle == NULL) return;
-    void (*CC_SHA1)(const void *data, long len, unsigned char *md) = (void (*)(const void *data, long len, unsigned char *md))dlsym(security_handle, "CC_SHA1");
+    typedef void (*ccsha1_ptr_t)(const void *data, long len, unsigned char *md);
+    ccsha1_ptr_t CC_SHA1 = (ccsha1_ptr_t)dlsym(security_handle, "CC_SHA1");
     if(CC_SHA1 == NULL) return;
 
     // A11 and lower UDID = SHA1(serial + ecid + wifiAddress + bluetoothAddress)
@@ -72,15 +73,14 @@ NSString *getUDID() {
 
     NSMutableString *secret = [NSMutableString stringWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
 
-    for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++) {
+    for(int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++) {
         [secret appendFormat:@"%02x", digest[i]];
     }
 
-    #endif
+#endif
 
     // Send what we got.
     return secret;
-
 }
 
 // Obviously you would not have main in a tweak.
